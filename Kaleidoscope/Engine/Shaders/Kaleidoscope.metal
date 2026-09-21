@@ -3,14 +3,11 @@
 //  KaleidoSense
 //
 //  GPU kaleidoscope renderer. A single full-screen fragment pass performs:
-//    1. Lens / barrel distortion of the screen coordinate.
+//    1. Subtle lens distortion of the screen coordinate.
 //    2. Motion-driven rotation and translation of the sampling point.
 //    3. Dihedral (mirror + radial) symmetry folding into a base wedge.
-//    4. Procedural "stained glass" background + soft glass-fragment blobs.
-//    5. Chromatic aberration, bloom, glow, vignette and tone mapping.
-//
-//  Everything is evaluated analytically per pixel, so there is no texture
-//  upload cost and the renderer scales cleanly from 60 to 120 FPS.
+//    4. Polygonal cut-glass Voronoi shards with metallic cames.
+//    5. Edge-only chromatic aberration, bloom, glow, vignette and ACES tone map.
 //
 
 #include <metal_stdlib>
@@ -26,7 +23,6 @@ struct VSOut {
 };
 
 vertex VSOut vertex_main(uint vid [[vertex_id]]) {
-    // Oversized triangle that covers the whole clip space in a single primitive.
     const float2 verts[3] = {
         float2(-1.0, -1.0),
         float2( 3.0, -1.0),
@@ -39,7 +35,7 @@ vertex VSOut vertex_main(uint vid [[vertex_id]]) {
     return out;
 }
 
-// MARK: - Hash / value noise / fBm helpers
+// MARK: - Helpers
 
 static inline float hash21(float2 p) {
     p = fract(p * float2(123.34, 345.45));
@@ -61,7 +57,7 @@ static inline float valueNoise(float2 p) {
 static inline float fbm(float2 p) {
     float value = 0.0;
     float amplitude = 0.5;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 4; i++) {
         value += amplitude * valueNoise(p);
         p = p * 2.02 + float2(11.3, 7.1);
         amplitude *= 0.5;
@@ -69,68 +65,81 @@ static inline float fbm(float2 p) {
     return value;
 }
 
-// Iridescent / thin-film cosine palette (Inigo Quilez style). Produces smooth
-// rainbow shifts used to tint the glass under the moving light.
 static inline float3 cosPalette(float t) {
-    return 0.5 + 0.5 * cos(6.2831853 * (t + float3(0.0, 0.33, 0.67)));
+    return 0.5 + 0.5 * cos(6.2831853 * (t + float3(0.00, 0.33, 0.67)));
 }
 
-// MARK: - Symmetry fold
+static inline float2 rot2(float2 p, float a) {
+    float c = cos(a);
+    float s = sin(a);
+    return float2(c * p.x - s * p.y, s * p.x + c * p.y);
+}
 
-// Folds a point into the base dihedral wedge so symmetric output pixels map to
-// the same sample location, producing true mirror + rotational symmetry.
+// Hexagonal / diamond metric. Gives polygonal stained-glass cells instead of
+// soft circular blobs — the silhouette of cut gem shards.
+static inline float polyMetric(float2 d, float seed) {
+    float2 a = abs(d);
+    float hex = max(a.x * 0.8660254 + a.y * 0.5, a.y);
+    float dia = (a.x + a.y) * 0.70710678;
+    float tri = max(a.x * 0.8660254 + d.y * 0.5, -d.y);
+    float k = fract(seed * 7.13);
+    if (k < 0.38) { return hex; }
+    if (k < 0.72) { return dia; }
+    return tri;
+}
+
 static inline float2 foldToWedge(float2 p, float segments) {
     float r = length(p);
     float a = atan2(p.y, p.x);
     float seg = (2.0 * M_PI_F) / max(segments, 1.0);
-    a = a - seg * floor(a / seg);   // wrap into [0, seg)
-    a = fabs(a - seg * 0.5);        // mirror within the wedge
+    a = a - seg * floor(a / seg);
+    a = fabs(a - seg * 0.5);
     return float2(cos(a), sin(a)) * r;
 }
 
-// MARK: - Pattern evaluation (the "object chamber")
-
-// Mirror-tiles a scalar into [0, c] (triangle wave) so the pattern repeats and
-// fills the whole screen instead of fading out to background past the chamber.
 static inline float mirrorRange(float x, float c) {
     float p = fmod(x, 2.0 * c);
     if (p < 0.0) { p += 2.0 * c; }
     return c - fabs(p - c);
 }
 
-// Renders crisp "glass shard" cells using an additively-weighted Voronoi over
-// the fragment positions. Every pixel belongs to the nearest shard, so the
-// pattern covers the whole field (no ring / no dark centre). Thin dark lines at
-// cell boundaries read as the leading/cames between pieces of stained glass.
-//
-// `chromaScale` evaluates the field at a slightly different radius per color
-// channel for subtle chromatic aberration.
+// Compact ACES filmic curve — preserves jewel saturation better than Reinhard.
+static inline float3 acesTonemap(float3 x) {
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    return saturate((x * (a * x + b)) / (x * (c * x + d) + e));
+}
+
+// MARK: - Pattern evaluation
+
 static inline float3 evalPattern(float2 sp,
                                  float chromaScale,
                                  constant Uniforms &U,
                                  device const GPUParticle *particles) {
-    // Radial mirror-tiling: keep the folded angle, repeat the radius outward so
-    // the rosette tessellates across the entire screen.
     float angle = atan2(sp.y, sp.x);
     float radius = length(sp) * chromaScale;
-    float cellR = 1.05;                                   // matches chamber radius
+    float cellR = 1.05;
     radius = mirrorRange(radius, cellR);
     float2 q = float2(cos(angle), sin(angle)) * radius;
 
-    // Faint procedural depth that only shows through the leading lines.
-    float t = U.time * 0.05 * (1.0 - U.reduceMotion * 0.85);
-    float n = fbm(q * 2.2 + float2(t, -t));
+    float t = U.time * 0.04 * (1.0 - U.reduceMotion * 0.85);
+    float n = fbm(q * 3.4 + float2(t, -t));
 
-    // Additively-weighted Voronoi: larger shards (radius) claim larger cells.
     int count = max(min(U.particleCount, KS_MAX_PARTICLES), 1);
     float bestD = 1e9;
     float secondD = 1e9;
     int best = 0;
     for (int i = 0; i < count; i++) {
         GPUParticle pt = particles[i];
-        float d = length(q - pt.position) - pt.radius * 1.7;
+        float2 delta = rot2(q - pt.position, -pt.rotation);
+        float d = polyMetric(delta, pt.seed) - pt.radius * 1.05;
         if (d < bestD) {
-            secondD = bestD; bestD = d; best = i;
+            secondD = bestD;
+            bestD = d;
+            best = i;
         } else if (d < secondD) {
             secondD = d;
         }
@@ -139,64 +148,70 @@ static inline float3 evalPattern(float2 sp,
     GPUParticle bp = particles[best];
     float3 cellColor = bp.color.rgb;
 
-    // Faceted gem shading: brighter toward the seed, darker toward the edges,
-    // with an animated refraction shimmer per shard.
-    float facet = clamp(1.0 - bestD * 0.7, 0.28, 1.25);
-    float shimmer = 0.5 + 0.5 * sin(U.time * 2.0 + bp.seed * 30.0 + bestD * 12.0);
+    // Cut-glass interior: discrete facet planes from the shard orientation.
+    float2 local = rot2(q - bp.position, -bp.rotation);
+    float ang = atan2(local.y, local.x);
+    float sides = 3.0 + floor(fract(bp.seed * 5.91) * 4.0);   // 3–6 cuts
+    float ridges = abs(sin(ang * sides * 0.5));
+    float plane = pow(ridges, 0.45);
+    cellColor *= 0.72 + 0.42 * plane;
+
+    // Harder core-to-edge falloff so each shard reads as a faceted gem, not a blob.
+    float facet = clamp(1.0 - bestD * 1.15, 0.22, 1.35);
+    float shimmer = 0.5 + 0.5 * sin(U.time * 1.6 + bp.seed * 30.0 + bestD * 14.0);
     cellColor *= facet;
-    cellColor *= 1.0 + bp.refraction * U.refraction * shimmer * 0.22;
+    cellColor *= 1.0 + bp.refraction * U.refraction * shimmer * 0.18;
 
-    // --- Dynamic lighting -------------------------------------------------
-    // A primary light orbits slowly and is pushed around by device tilt, so on
-    // a real iPhone the highlights and color shifts track how you hold it. A
-    // second, counter-orbiting light and a moving light sweep add liveliness.
-    float mo = 1.0 - U.reduceMotion;                 // freeze when Reduce Motion
-    float energyBoost = 0.6 + U.motionEnergy * 0.9;  // brighter when moving
+    float mo = 1.0 - U.reduceMotion;
+    float energyBoost = 0.55 + U.motionEnergy * 0.85;
 
-    float2 lightPos = float2(cos(U.time * 0.5), sin(U.time * 0.37)) * 0.55 * mo
-                      + U.tilt * 0.9;
+    float2 lightPos = float2(cos(U.time * 0.48), sin(U.time * 0.35)) * 0.52 * mo
+                      + U.tilt * 0.85;
     float dL = length(q - lightPos);
-    float illum = exp(-dL * dL * 1.4);
+    float illum = exp(-dL * dL * 1.8);
 
-    float2 lightPos2 = float2(cos(U.time * -0.31 + 2.0), sin(U.time * 0.43 + 1.0)) * 0.5 * mo
-                       - U.tilt * 0.6;
+    float2 lightPos2 = float2(cos(U.time * -0.29 + 2.1), sin(U.time * 0.41 + 1.0)) * 0.48 * mo
+                       - U.tilt * 0.55;
     float dL2 = length(q - lightPos2);
-    float illum2 = exp(-dL2 * dL2 * 1.8);
+    float illum2 = exp(-dL2 * dL2 * 2.2);
 
-    // Iridescent thin-film tint that shifts with the light and per shard.
-    float3 irid = cosPalette(facet * 0.5 + bp.seed + dL * 0.25 + U.time * 0.04 * mo);
-    cellColor = mix(cellColor, cellColor * 1.15 + irid * 0.55, illum * 0.4);
+    float3 irid = cosPalette(facet * 0.35 + bp.seed + dL * 0.2 + U.time * 0.03 * mo);
+    cellColor = mix(cellColor, cellColor * 1.12 + irid * 0.32, illum * 0.32);
 
-    // Light enhances brightness and saturation where it falls.
-    float3 lum = float3(dot(cellColor, float3(0.299, 0.587, 0.114)));
-    cellColor = mix(cellColor, mix(lum, cellColor, 1.6), illum * 0.5);   // saturate
-    cellColor *= 1.0 + (illum * 1.1 + illum2 * 0.45) * energyBoost * (0.6 + U.glow);
+    float luma = dot(cellColor, float3(0.2126, 0.7152, 0.0722));
+    cellColor = mix(float3(luma), cellColor, 1.22);          // punch saturation
+    cellColor *= 1.0 + (illum * 0.85 + illum2 * 0.35) * energyBoost * (0.55 + U.glow);
 
-    // Travelling light sweep (a soft bright band gliding across the field).
-    float2 sweepDir = float2(0.6, 0.8);
-    float sweepPhase = sin(U.time * 0.6 * mo) * 1.3;
-    float sweep = exp(-pow((dot(q, sweepDir) - sweepPhase) * 2.4, 2.0));
-    cellColor *= 1.0 + sweep * 0.35;
+    float2 sweepDir = float2(0.62, 0.78);
+    float sweepPhase = sin(U.time * 0.55 * mo) * 1.2;
+    float sweep = exp(-pow((dot(q, sweepDir) - sweepPhase) * 2.8, 2.0));
+    cellColor *= 1.0 + sweep * 0.22;
 
-    // Crisp leading line: where the two nearest shards are nearly equidistant.
-    // `fwidth` keeps the edge exactly one pixel wide (anti-aliased but sharp).
+    // Hairline metallic cames (solder between stained-glass pieces).
     float diff = secondD - bestD;
-    float w = fwidth(diff) * 1.5 + 0.005;
+    float w = max(fwidth(diff) * 0.65, 0.0012);
     float border = smoothstep(0.0, w, diff);
-    float3 lead = U.background.rgb * 0.18;
-    float3 col = mix(lead, cellColor, border);
+    float3 cameDark = float3(0.07, 0.06, 0.05);
+    float3 cameHi   = float3(0.78, 0.74, 0.66);
+    float3 came = mix(cameDark, cameHi, 0.22 + illum * 0.55);
+    float3 col = mix(came, cellColor, border);
 
-    // Crisp specular glints: tight highlight on facets nearest the light.
-    float spec = exp(-dL * dL * 9.0) * smoothstep(0.6, 1.2, facet);
-    spec += exp(-dL2 * dL2 * 12.0) * smoothstep(0.7, 1.2, facet) * 0.6;
-    float3 specCol = mix(float3(1.0), irid, 0.35);
-    col += specCol * spec * energyBoost * 0.9;
+    // Bright glass rim (Fresnel) just inside the came — sells thickness.
+    float rim = (1.0 - smoothstep(0.0, w * 5.5, diff)) * border;
+    col += cellColor * rim * 0.45;
+    col += float3(1.0, 0.97, 0.92) * rim * 0.22;
 
-    // Tight bloom on only the brightest shards (kept crisp, not a blur).
-    col += cellColor * smoothstep(1.0, 1.25, facet) * U.bloom * 0.15;
+    // Internal cut lines — thin bright scratches on the facet planes.
+    float cut = smoothstep(0.08, 0.015, ridges) * border;
+    col += float3(1.0, 0.98, 0.94) * cut * (0.18 + illum * 0.25);
 
-    // Subtle depth modulation from the procedural field.
-    col *= 0.9 + 0.2 * n;
+    // Tight anisotropic glints along facet edges.
+    float spec = exp(-dL * dL * 14.0) * smoothstep(0.75, 1.25, facet);
+    spec += exp(-dL2 * dL2 * 18.0) * smoothstep(0.8, 1.3, facet) * 0.55;
+    col += mix(float3(1.0), irid, 0.22) * spec * energyBoost * 0.7;
+
+    col += cellColor * smoothstep(1.05, 1.32, facet) * U.bloom * 0.10;
+    col *= 0.94 + 0.10 * n;
     return col;
 }
 
@@ -207,32 +222,26 @@ fragment float4 fragment_main(VSOut in [[stage_in]],
                               device const GPUParticle *particles [[buffer(KSBufferIndexParticles)]]) {
     float2 res = U.resolution;
     float2 frag = in.position.xy;
-    float2 uv = frag / res;                      // 0...1 across the drawable
-    // Isotropic centered coordinates: a circle stays a circle in portrait.
+    float2 uv = frag / res;
     float2 p = (frag - 0.5 * res) / min(res.x, res.y) * 2.0;
 
-    // Barrel / lens distortion.
     float r2 = dot(p, p);
-    p *= 1.0 + U.lensDistortion * 0.18 * r2;
+    p *= 1.0 + U.lensDistortion * 0.10 * r2;
 
-    // Rotate by idle drift + device yaw, then translate by tilt for parallax.
     float ang = U.patternRotation + U.rotationZ;
     float ca = cos(ang);
     float sa = sin(ang);
     p = float2(ca * p.x - sa * p.y, sa * p.x + ca * p.y);
-    p += U.tilt * 0.25 * (1.0 - U.reduceMotion);
-
-    // Zoom (smaller value -> more magnified).
+    p += U.tilt * 0.22 * (1.0 - U.reduceMotion);
     p /= max(U.zoom, 0.05);
 
-    // Symmetry fold.
     float2 sp = foldToWedge(p, U.segments);
 
-    // Chromatic aberration: evaluate the pattern at slightly different scales
-    // per channel. Kept subtle so the crisp shard edges stay clean.
-    float camt = U.chromaticAberration * 0.010;
+    // Chromatic aberration only toward the screen edge so shard interiors stay crisp.
+    float edgeAmt = smoothstep(0.45, 1.35, length(p));
+    float camt = U.chromaticAberration * 0.006 * edgeAmt;
     float3 col;
-    if (camt > 0.0001) {
+    if (camt > 0.00015) {
         float rC = evalPattern(sp, 1.0 - camt, U, particles).r;
         float gC = evalPattern(sp, 1.0,         U, particles).g;
         float bC = evalPattern(sp, 1.0 + camt, U, particles).b;
@@ -241,20 +250,19 @@ fragment float4 fragment_main(VSOut in [[stage_in]],
         col = evalPattern(sp, 1.0, U, particles);
     }
 
-    // Gentle additive glow on the brightest regions only.
-    col += pow(max(col - 0.75, float3(0.0)), float3(2.0)) * U.glow * 0.6;
+    col += pow(max(col - 0.82, float3(0.0)), float3(2.2)) * U.glow * 0.45;
 
-    // Vignette.
-    float vig = smoothstep(1.7, 0.2, length(uv * 2.0 - 1.0));
-    col *= mix(1.0, vig, U.vignette);
+    // Optical-tube vignette: darker corners, bright chamber — still full-screen.
+    float vig = smoothstep(1.85, 0.18, length(uv * 2.0 - 1.0));
+    col *= mix(1.0, vig, U.vignette * 0.85);
+    col *= 0.90 + 0.14 * exp(-r2 * 0.35);
 
-    // Filmic exposure tone map: naturally rolls off highlights so dense
-    // particle/halo regions stay rich and saturated instead of clipping white.
-    col = 1.0 - exp(-col * 1.25);
-    col = pow(max(col, float3(0.0)), float3(0.92));
+    col = acesTonemap(col * 1.18);
+    col = pow(max(col, float3(0.0)), float3(0.96));
 
-    // Respect Reduce Transparency by flattening toward a solid look.
-    col = mix(col, clamp(col, 0.0, 1.0), U.reduceTransparency);
+    float luma = dot(col, float3(0.2126, 0.7152, 0.0722));
+    col = mix(float3(luma), col, 1.12);
 
+    col = mix(col, saturate(col), U.reduceTransparency);
     return float4(col, 1.0);
 }

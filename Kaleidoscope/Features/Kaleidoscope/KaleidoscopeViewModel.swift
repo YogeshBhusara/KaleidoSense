@@ -153,7 +153,7 @@ final class KaleidoscopeViewModel: KaleidoscopeFrameSource {
         // Drive all shader-side animation from the motion-gated clock so the
         // light orbit, sweep and shimmer freeze when the phone is steady.
         let time = animationPhase
-        let breathing = reduceMotion ? 1.0 : (1.0 + sin(time * 0.6) * 0.04)
+        let breathing = reduceMotion ? 0.88 : (0.88 + sin(time * 0.55) * 0.025)
 
         var u = Uniforms()
         u.paletteA = palette.a

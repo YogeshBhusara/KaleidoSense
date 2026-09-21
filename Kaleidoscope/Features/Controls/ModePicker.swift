@@ -44,7 +44,7 @@ struct ModePicker: View {
                     .environment(\.colorScheme, .dark)
             }
             .overlay {
-                Capsule().strokeBorder(.white.opacity(isSelected ? 0.0 : 0.18), lineWidth: 1)
+                Capsule().strokeBorder(.white.opacity(isSelected ? 0.45 : 0.16), lineWidth: 0.8)
             }
         }
         .buttonStyle(.plain)

@@ -2,9 +2,9 @@
 //  GlassCard.swift
 //  KaleidoSense
 //
-//  Reusable glassmorphism container. Uses a thin material with a soft border
-//  and highlight to evoke "liquid glass". Respects Reduce Transparency by
-//  falling back to a solid, high-contrast surface.
+//  Reusable glassmorphism container. Uses a thin material with a dual-edge
+//  highlight to evoke cut crystal. Respects Reduce Transparency by falling
+//  back to a solid, high-contrast surface.
 //
 
 import SwiftUI
@@ -18,25 +18,27 @@ struct GlassCard<Content: View>: View {
     var body: some View {
         content
             .background {
-                if reduceTransparency {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(Color.black.opacity(0.85))
-                } else {
-                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                        .environment(\.colorScheme, .dark)
-                }
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(reduceTransparency
+                          ? AnyShapeStyle(Color.black.opacity(0.88))
+                          : AnyShapeStyle(.ultraThinMaterial))
+                    .environment(\.colorScheme, .dark)
             }
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .strokeBorder(
                         LinearGradient(
-                            colors: [.white.opacity(0.35), .white.opacity(0.05)],
+                            colors: [.white.opacity(0.55), .white.opacity(0.08), .white.opacity(0.22)],
                             startPoint: .topLeading, endPoint: .bottomTrailing),
-                        lineWidth: 1)
+                        lineWidth: 0.8)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius - 1, style: .continuous)
+                    .strokeBorder(.white.opacity(0.08), lineWidth: 0.5)
+                    .padding(1)
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .shadow(color: Theme.panelShadow, radius: 18, x: 0, y: 10)
+            .shadow(color: Theme.panelShadow, radius: 22, x: 0, y: 12)
     }
 }
 
@@ -52,18 +54,23 @@ struct GlassIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(isActive ? Theme.accent : tint)
-                .frame(width: 52, height: 52)
+                .frame(width: 54, height: 54)
                 .background {
-                    Circle().fill(reduceTransparency ? AnyShapeStyle(Color.black.opacity(0.85))
+                    Circle().fill(reduceTransparency ? AnyShapeStyle(Color.black.opacity(0.88))
                                                       : AnyShapeStyle(.ultraThinMaterial))
                         .environment(\.colorScheme, .dark)
                 }
                 .overlay {
-                    Circle().strokeBorder(.white.opacity(isActive ? 0.5 : 0.18), lineWidth: 1)
+                    Circle().strokeBorder(
+                        LinearGradient(
+                            colors: [.white.opacity(isActive ? 0.7 : 0.45), .white.opacity(0.08)],
+                            startPoint: .top, endPoint: .bottom),
+                        lineWidth: 0.8)
                 }
-                .shadow(color: Theme.panelShadow, radius: 10, y: 5)
+                .shadow(color: isActive ? Theme.accent.opacity(0.35) : Theme.panelShadow,
+                        radius: isActive ? 12 : 10, y: 5)
         }
         .buttonStyle(.plain)
     }

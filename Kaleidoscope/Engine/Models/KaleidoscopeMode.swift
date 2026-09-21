@@ -109,17 +109,17 @@ enum KaleidoscopeMode: Int, CaseIterable, Identifiable, Sendable {
     var particleConfig: ParticleConfig {
         switch self {
         case .classic:
-            return .init(count: 40, minRadius: 0.05, maxRadius: 0.16, refraction: 0.6, spin: 0.4, alpha: 0.92)
+            return .init(count: 56, minRadius: 0.035, maxRadius: 0.12, refraction: 0.7, spin: 0.4, alpha: 1.0)
         case .crystalDreams:
-            return .init(count: 48, minRadius: 0.04, maxRadius: 0.13, refraction: 0.95, spin: 0.25, alpha: 0.85)
+            return .init(count: 60, minRadius: 0.028, maxRadius: 0.10, refraction: 0.98, spin: 0.25, alpha: 0.95)
         case .cosmicGalaxy:
-            return .init(count: 56, minRadius: 0.02, maxRadius: 0.10, refraction: 0.7, spin: 0.6, alpha: 0.95)
+            return .init(count: 64, minRadius: 0.018, maxRadius: 0.085, refraction: 0.8, spin: 0.6, alpha: 1.0)
         case .neonPrism:
-            return .init(count: 36, minRadius: 0.05, maxRadius: 0.15, refraction: 0.5, spin: 0.5, alpha: 1.0)
+            return .init(count: 50, minRadius: 0.04, maxRadius: 0.12, refraction: 0.55, spin: 0.5, alpha: 1.0)
         case .liquidGlass:
-            return .init(count: 30, minRadius: 0.08, maxRadius: 0.22, refraction: 0.9, spin: 0.15, alpha: 0.7)
+            return .init(count: 42, minRadius: 0.055, maxRadius: 0.16, refraction: 0.95, spin: 0.15, alpha: 0.88)
         case .mandala:
-            return .init(count: 52, minRadius: 0.03, maxRadius: 0.12, refraction: 0.65, spin: 0.35, alpha: 0.95)
+            return .init(count: 62, minRadius: 0.022, maxRadius: 0.095, refraction: 0.72, spin: 0.35, alpha: 1.0)
         }
     }
 
@@ -143,17 +143,17 @@ enum KaleidoscopeMode: Int, CaseIterable, Identifiable, Sendable {
     var effectConfig: EffectConfig {
         switch self {
         case .classic:
-            return .init(bloom: 0.7, chromaticAberration: 0.5, lensDistortion: 0.5, glow: 0.5, refraction: 1.0, vignette: 0.6)
+            return .init(bloom: 0.55, chromaticAberration: 0.28, lensDistortion: 0.28, glow: 0.42, refraction: 1.0, vignette: 0.55)
         case .crystalDreams:
-            return .init(bloom: 0.9, chromaticAberration: 0.7, lensDistortion: 0.35, glow: 0.7, refraction: 1.3, vignette: 0.5)
+            return .init(bloom: 0.7, chromaticAberration: 0.32, lensDistortion: 0.2, glow: 0.55, refraction: 1.25, vignette: 0.45)
         case .cosmicGalaxy:
-            return .init(bloom: 1.1, chromaticAberration: 0.6, lensDistortion: 0.6, glow: 0.9, refraction: 1.1, vignette: 0.75)
+            return .init(bloom: 0.85, chromaticAberration: 0.3, lensDistortion: 0.32, glow: 0.7, refraction: 1.05, vignette: 0.68)
         case .neonPrism:
-            return .init(bloom: 1.0, chromaticAberration: 0.9, lensDistortion: 0.4, glow: 1.0, refraction: 0.9, vignette: 0.55)
+            return .init(bloom: 0.75, chromaticAberration: 0.4, lensDistortion: 0.22, glow: 0.8, refraction: 0.9, vignette: 0.5)
         case .liquidGlass:
-            return .init(bloom: 0.6, chromaticAberration: 0.45, lensDistortion: 0.7, glow: 0.5, refraction: 1.4, vignette: 0.5)
+            return .init(bloom: 0.5, chromaticAberration: 0.24, lensDistortion: 0.38, glow: 0.4, refraction: 1.35, vignette: 0.45)
         case .mandala:
-            return .init(bloom: 0.8, chromaticAberration: 0.4, lensDistortion: 0.3, glow: 0.7, refraction: 1.0, vignette: 0.65)
+            return .init(bloom: 0.6, chromaticAberration: 0.22, lensDistortion: 0.18, glow: 0.55, refraction: 1.0, vignette: 0.58)
         }
     }
 

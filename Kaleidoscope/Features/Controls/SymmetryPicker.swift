@@ -27,6 +27,10 @@ struct SymmetryPicker: View {
                                 .fill(isSelected ? AnyShapeStyle(Theme.accent)
                                                  : AnyShapeStyle(Color.white.opacity(0.08)))
                         }
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .strokeBorder(.white.opacity(isSelected ? 0.4 : 0.12), lineWidth: 0.8)
+                        }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text(mode.accessibilityLabel))
